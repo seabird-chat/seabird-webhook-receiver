@@ -89,7 +89,7 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	case github.IssuesPayload:
 		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
 			ChannelId: s.targetChannelId,
-			Text:      fmt.Sprintf("Issue %q %s by %s", event.Issue.Title, event.Action, event.Issue.User.Login),
+			Text:      fmt.Sprintf("[%s] Issue %q %s by %s", event.Repository.FullName, event.Issue.Title, event.Action, event.Issue.User.Login),
 		})
 
 	case github.PullRequestPayload:
@@ -105,7 +105,7 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 
 		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
 			ChannelId: s.targetChannelId,
-			Text:      fmt.Sprintf("Pull request %q %s by %s", event.PullRequest.Title, action, event.PullRequest.User.Login),
+			Text:      fmt.Sprintf("[%s] Pull request %q %s by %s", event.Repository.FullName, event.PullRequest.Title, action, event.PullRequest.User.Login),
 		})
 
 	case github.PushPayload:
