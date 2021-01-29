@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -89,7 +90,14 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	case github.IssuesPayload:
 		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
 			ChannelId: s.targetChannelId,
-			Text:      fmt.Sprintf("[%s] Issue %q %s by %s", event.Repository.FullName, event.Issue.Title, event.Action, event.Issue.User.Login),
+			Text: fmt.Sprintf(
+				"[%s] %s %s issue %s: %s",
+				event.Repository.FullName,
+				event.Issue.User.Login,
+				event.Action,
+				event.Issue.Title,
+				event.Issue.URL,
+			),
 		})
 
 	case github.PullRequestPayload:
@@ -105,20 +113,79 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 
 		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
 			ChannelId: s.targetChannelId,
-			Text:      fmt.Sprintf("[%s] Pull request %q %s by %s", event.Repository.FullName, event.PullRequest.Title, action, event.PullRequest.User.Login),
+			Text: fmt.Sprintf(
+				"[%s] %s %s pull request #%d: %s (%s...%s) %s",
+				event.Repository.FullName,
+				event.Sender.Login,
+				action,
+				event.PullRequest.Number,
+				event.PullRequest.Title,
+				event.PullRequest.Base.Ref,
+				event.PullRequest.Head.Ref,
+				event.PullRequest.URL),
 		})
 
 	case github.PushPayload:
-		if !contains(mainBranches, event.Ref) {
-			s.logger.Info().Msgf("Skipping push event for ref %s", event.Ref)
-			break
+		action := "pushed"
+		if event.Deleted && !event.Created {
+			action = "deleted"
+		} else if event.Forced {
+			action = "force pushed"
 		}
 
-		for _, commit := range event.Commits {
+		if strings.HasPrefix(event.Ref, "refs/tags/") {
+			split := strings.SplitN(event.Ref, "/", 3)
+			tag := "<unknown>"
+			if len(split) == 3 {
+				tag = split[2]
+			}
+
 			_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
 				ChannelId: s.targetChannelId,
-				Text:      fmt.Sprintf("[%s] %s %s by %s", event.Repository.FullName, commit.ID[:8], commit.Message, commit.Author.Username),
+				Text: fmt.Sprintf(
+					"[%s] %s %s tag %s: %s",
+					event.Repository.FullName,
+					event.Pusher.Name,
+					action,
+					tag,
+					event.Compare),
 			})
+		} else {
+			if !contains(mainBranches, event.Ref) {
+				s.logger.Info().Msgf("Skipping push event for ref %s", event.Ref)
+				break
+			}
+
+			split := strings.SplitN(event.Ref, "/", 3)
+			branch := "<unknown>"
+			if len(split) == 3 {
+				branch = split[2]
+			}
+
+			_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
+				ChannelId: s.targetChannelId,
+				Text: fmt.Sprintf(
+					"[%s] %s %s %d commit(s) to %s: %s",
+					event.Repository.FullName,
+					event.Pusher.Name,
+					action,
+					len(event.Commits),
+					branch,
+					event.Compare),
+			})
+
+			for _, commit := range event.Commits {
+				_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
+					ChannelId: s.targetChannelId,
+					Text: fmt.Sprintf(
+						"[%s] [%s] %s %s: %s",
+						event.Repository.FullName,
+						branch,
+						commit.ID[:8],
+						commit.Author.Username,
+						commit.Message),
+				})
+			}
 		}
 	}
 
@@ -161,7 +228,7 @@ func (s *Server) runSeabird() error {
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	// TODO: use the ctx
+	// TODO: use the ctx Luke
 	group, _ := errgroup.WithContext(ctx)
 
 	group.Go(s.runHttp)
