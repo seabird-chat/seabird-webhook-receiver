@@ -63,6 +63,17 @@ func NewServer(config Config) (*Server, error) {
 	}, nil
 }
 
+func (s *Server) sendSeabirdMessagef(format string, args ...interface{}) error {
+	_, err := s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
+		ChannelId: s.targetChannelId,
+		Text:      fmt.Sprintf(format, args...),
+		Tags: map[string]string{
+			"url/skip": "1",
+		},
+	})
+	return err
+}
+
 func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 	payload, err := s.github.Parse(r,
 		github.PingEvent,
@@ -82,24 +93,16 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 
 	switch event := payload.(type) {
 	case github.PingPayload:
-		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-			ChannelId: s.targetChannelId,
-			Text:      fmt.Sprintf("Callback added by %s", event.Sender.Login),
-		})
-
+		err = s.sendSeabirdMessagef("Callback added by %s", event.Sender.Login)
 	case github.IssuesPayload:
-		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-			ChannelId: s.targetChannelId,
-			Text: fmt.Sprintf(
-				"[%s] %s %s issue %s: %s",
-				event.Repository.FullName,
-				event.Issue.User.Login,
-				event.Action,
-				event.Issue.Title,
-				event.Issue.URL,
-			),
-		})
-
+		err = s.sendSeabirdMessagef(
+			"[%s] %s %s issue %s: %s",
+			event.Repository.FullName,
+			event.Issue.User.Login,
+			event.Action,
+			event.Issue.Title,
+			event.Issue.URL,
+		)
 	case github.PullRequestPayload:
 		if !contains(prActions, event.Action) {
 			s.logger.Info().Msgf("Skipping pull request event of type %s for %q", event.Action, event.PullRequest.Title)
@@ -111,20 +114,17 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 			action = "merged"
 		}
 
-		_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-			ChannelId: s.targetChannelId,
-			Text: fmt.Sprintf(
-				"[%s] %s %s pull request #%d: %s (%s...%s) %s",
-				event.Repository.FullName,
-				event.Sender.Login,
-				action,
-				event.PullRequest.Number,
-				event.PullRequest.Title,
-				event.PullRequest.Base.Ref,
-				event.PullRequest.Head.Ref,
-				event.PullRequest.URL),
-		})
-
+		err = s.sendSeabirdMessagef(
+			"[%s] %s %s pull request #%d: %s (%s...%s) %s",
+			event.Repository.FullName,
+			event.Sender.Login,
+			action,
+			event.PullRequest.Number,
+			event.PullRequest.Title,
+			event.PullRequest.Base.Ref,
+			event.PullRequest.Head.Ref,
+			event.PullRequest.URL,
+		)
 	case github.PushPayload:
 		action := "pushed"
 		if event.Deleted && !event.Created {
@@ -140,16 +140,15 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 				tag = split[2]
 			}
 
-			_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-				ChannelId: s.targetChannelId,
-				Text: fmt.Sprintf(
-					"[%s] %s %s tag %s: %s",
-					event.Repository.FullName,
-					event.Pusher.Name,
-					action,
-					tag,
-					event.Compare),
-			})
+			err = s.sendSeabirdMessagef(
+				"[%s] %s %s tag %s: %s",
+				event.Repository.FullName,
+				event.Pusher.Name,
+				action,
+				tag,
+				event.Compare,
+			)
+
 		} else {
 			if !contains(mainBranches, event.Ref) {
 				s.logger.Info().Msgf("Skipping push event for ref %s", event.Ref)
@@ -162,29 +161,25 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 				branch = split[2]
 			}
 
-			_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-				ChannelId: s.targetChannelId,
-				Text: fmt.Sprintf(
-					"[%s] %s %s %d commit(s) to %s: %s",
-					event.Repository.FullName,
-					event.Pusher.Name,
-					action,
-					len(event.Commits),
-					branch,
-					event.Compare),
-			})
+			err = s.sendSeabirdMessagef(
+				"[%s] %s %s %d commit(s) to %s: %s",
+				event.Repository.FullName,
+				event.Pusher.Name,
+				action,
+				len(event.Commits),
+				branch,
+				event.Compare,
+			)
 
 			for _, commit := range event.Commits {
-				_, err = s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
-					ChannelId: s.targetChannelId,
-					Text: fmt.Sprintf(
-						"[%s] [%s] %s %s: %s",
-						event.Repository.FullName,
-						branch,
-						commit.ID[:8],
-						commit.Author.Username,
-						commit.Message),
-				})
+				err = s.sendSeabirdMessagef(
+					"[%s] [%s] %s %s: %s",
+					event.Repository.FullName,
+					branch,
+					commit.ID[:8],
+					commit.Author.Username,
+					commit.Message,
+				)
 			}
 		}
 	}
