@@ -96,12 +96,12 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		err = s.sendSeabirdMessagef("Callback added by %s", event.Sender.Login)
 	case github.IssuesPayload:
 		err = s.sendSeabirdMessagef(
-			"[%s] %s %s issue %s: %s",
+			"[%s] %s %s issue %q: %s",
 			event.Repository.FullName,
-			event.Issue.User.Login,
+			event.Sender.Login,
 			event.Action,
 			event.Issue.Title,
-			event.Issue.URL,
+			event.Issue.HTMLURL,
 		)
 	case github.PullRequestPayload:
 		if !contains(prActions, event.Action) {
@@ -115,7 +115,7 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 
 		err = s.sendSeabirdMessagef(
-			"[%s] %s %s pull request #%d: %s (%s...%s) %s",
+			"[%s] %s %s pull request #%d: %q (%s...%s) %s",
 			event.Repository.FullName,
 			event.Sender.Login,
 			action,
@@ -123,7 +123,7 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 			event.PullRequest.Title,
 			event.PullRequest.Base.Ref,
 			event.PullRequest.Head.Ref,
-			event.PullRequest.URL,
+			event.PullRequest.HTMLURL,
 		)
 	case github.PushPayload:
 		action := "pushed"
