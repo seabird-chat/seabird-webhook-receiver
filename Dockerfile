@@ -21,4 +21,4 @@ COPY --from=builder /build /bin
 
 EXPOSE 3000
 
-ENTRYPOINT ["/usr/bin/seabird-entrypoint.sh"]
+CMD ["/usr/local/bin/seabird-entrypoint.sh"]
