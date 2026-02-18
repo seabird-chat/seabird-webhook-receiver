@@ -48,6 +48,7 @@ func main() {
 		SeabirdHost:    Env(logger, "SEABIRD_HOST"),
 		SeabirdToken:   Env(logger, "SEABIRD_TOKEN"),
 		SeabirdChannel: Env(logger, "SEABIRD_CHANNEL"),
+		ForgejoToken:   EnvDefault("FORGEJO_TOKEN", ""),
 	})
 	if err != nil {
 		logger.Fatal().Err(err).Msg("failed to start webhook receiver")
