@@ -45,7 +45,7 @@ type Config struct {
 	SeabirdToken   string
 	SeabirdChannel string
 	GithubToken    string
-	ForgejoToken   string
+	ForgejoSecret  string
 }
 
 func NewServer(config Config) (*Server, error) {
@@ -63,7 +63,7 @@ func NewServer(config Config) (*Server, error) {
 		logger:          config.Logger,
 		seabird:         seabird,
 		github:          github,
-		forgejoSecret:   config.ForgejoToken,
+		forgejoSecret:   config.ForgejoSecret,
 		targetChannelId: config.SeabirdChannel,
 	}, nil
 }
