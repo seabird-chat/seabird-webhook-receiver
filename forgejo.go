@@ -24,13 +24,13 @@ type ForgejoCommit struct {
 }
 
 type ForgejoPushPayload struct {
-	Ref        string          `json:"ref"`
-	Created    bool            `json:"created"`
-	Deleted    bool            `json:"deleted"`
-	Forced     bool            `json:"forced"`
-	CompareURL string          `json:"compare_url"`
-	Commits    []ForgejoCommit `json:"commits"`
-	Pusher     ForgejoUser     `json:"pusher"`
+	Ref        string            `json:"ref"`
+	Created    bool              `json:"created"`
+	Deleted    bool              `json:"deleted"`
+	Forced     bool              `json:"forced"`
+	CompareURL string            `json:"compare_url"`
+	Commits    []ForgejoCommit   `json:"commits"`
+	Pusher     ForgejoUser       `json:"pusher"`
 	Repository ForgejoRepository `json:"repository"`
 }
 
@@ -95,4 +95,3 @@ func verifyForgejoSignature(secret string, body []byte, r *http.Request) bool {
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(sig), []byte(expected))
 }
-
