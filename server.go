@@ -2,12 +2,9 @@ package seabird_webhook_receiver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -18,18 +15,6 @@ import (
 	"github.com/seabird-chat/seabird-go"
 	"github.com/seabird-chat/seabird-go/pb"
 )
-
-var mainBranches = []string{
-	"refs/heads/main",
-	"refs/heads/master",
-}
-
-var prActions = []string{
-	"opened",
-	"closed",
-	"reopened",
-	"merged",
-}
 
 type Server struct {
 	logger          zerolog.Logger
@@ -68,10 +53,18 @@ func NewServer(config Config) (*Server, error) {
 	}, nil
 }
 
-func (s *Server) sendSeabirdMessagef(format string, args ...interface{}) error {
-	_, err := s.seabird.Inner.SendMessage(context.TODO(), &pb.SendMessageRequest{
+// send posts an event's message to the target channel, skipping events that
+// have no message.
+func (s *Server) send(ctx context.Context, ev event) error {
+	block := ev.block()
+	if block == nil {
+		s.logger.Info().Msgf("Skipping %T", ev)
+		return nil
+	}
+
+	_, err := s.seabird.Inner.SendMessage(ctx, &pb.SendMessageRequest{
 		ChannelId: s.targetChannelId,
-		Text:      fmt.Sprintf(format, args...),
+		RootBlock: block,
 		Tags: map[string]string{
 			"url/skip": "1",
 		},
@@ -80,12 +73,12 @@ func (s *Server) sendSeabirdMessagef(format string, args ...interface{}) error {
 }
 
 func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
-	payload, err := s.github.Parse(r,
-		github.PingEvent,
-		github.IssuesEvent,
-		github.PullRequestEvent,
-		github.PushEvent)
-
+	payload, err := s.github.Parse(r, githubEvents...)
+	if errors.Is(err, github.ErrEventNotFound) {
+		s.logger.Info().Msgf("Skipping GitHub %q event", r.Header.Get("X-GitHub-Event"))
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err != nil {
 		s.logger.Error().Err(err).Msg("Got error when handling webhook")
 		w.WriteHeader(http.StatusInternalServerError)
@@ -94,105 +87,13 @@ func (s *Server) handleGithubWebhook(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info().Msgf("Got %T payload", payload)
 
-	//fmt.Printf("%+v\n", payload)
-
-	switch event := payload.(type) {
-	case github.PingPayload:
-		err = s.sendSeabirdMessagef("Callback added by %s", event.Sender.Login)
-	case github.IssuesPayload:
-		err = s.sendSeabirdMessagef(
-			"[%s] %s %s issue %q: %s",
-			event.Repository.FullName,
-			event.Sender.Login,
-			event.Action,
-			event.Issue.Title,
-			event.Issue.HTMLURL,
-		)
-	case github.PullRequestPayload:
-		if !contains(prActions, event.Action) {
-			s.logger.Info().Msgf("Skipping pull request event of type %s for %q", event.Action, event.PullRequest.Title)
-			break
-		}
-
-		action := event.Action
-		if action == "closed" && event.PullRequest.Merged {
-			action = "merged"
-		}
-
-		err = s.sendSeabirdMessagef(
-			"[%s] %s %s pull request #%d: %q (%s...%s) %s",
-			event.Repository.FullName,
-			event.Sender.Login,
-			action,
-			event.PullRequest.Number,
-			event.PullRequest.Title,
-			event.PullRequest.Base.Ref,
-			event.PullRequest.Head.Ref,
-			event.PullRequest.HTMLURL,
-		)
-	case github.PushPayload:
-		action := "pushed"
-		if event.Deleted && !event.Created {
-			action = "deleted"
-		} else if event.Forced {
-			action = "force pushed"
-		}
-
-		if strings.HasPrefix(event.Ref, "refs/tags/") {
-			split := strings.SplitN(event.Ref, "/", 3)
-			tag := "<unknown>"
-			if len(split) == 3 {
-				tag = split[2]
-			}
-
-			err = s.sendSeabirdMessagef(
-				"[%s] %s %s tag %s: %s",
-				event.Repository.FullName,
-				event.Pusher.Name,
-				action,
-				tag,
-				event.Compare,
-			)
-
-		} else {
-			if !contains(mainBranches, event.Ref) {
-				s.logger.Info().Msgf("Skipping push event for ref %s", event.Ref)
-				break
-			}
-
-			split := strings.SplitN(event.Ref, "/", 3)
-			branch := "<unknown>"
-			if len(split) == 3 {
-				branch = split[2]
-			}
-
-			err = s.sendSeabirdMessagef(
-				"[%s] %s %s %d commit(s) to %s: %s",
-				event.Repository.FullName,
-				event.Pusher.Name,
-				action,
-				len(event.Commits),
-				branch,
-				event.Compare,
-			)
-
-			for _, commit := range event.Commits {
-				err = s.sendSeabirdMessagef(
-					"[%s] [%s] %s %s: %s",
-					event.Repository.FullName,
-					branch,
-					commit.ID[:8],
-					commit.Author.Username,
-					commit.Message,
-				)
-				if err != nil {
-					break
-				}
-			}
-		}
+	ev := githubEvent(payload)
+	if ev == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
-	if err != nil {
+	if err := s.send(r.Context(), ev); err != nil {
 		s.logger.Error().Err(err).Msg("Got error when sending notification")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -215,148 +116,22 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event := r.Header.Get("X-Forgejo-Event")
-	s.logger.Info().Msgf("Got Forgejo %q event", event)
+	name := r.Header.Get("X-Forgejo-Event")
+	s.logger.Info().Msgf("Got Forgejo %q event", name)
 
-	switch event {
-	case "push":
-		var p ForgejoPushPayload
-		if err = json.Unmarshal(body, &p); err != nil {
-			break
-		}
-
-		action := "pushed"
-		if p.Deleted && !p.Created {
-			action = "deleted"
-		} else if p.Forced {
-			action = "force pushed"
-		}
-
-		if strings.HasPrefix(p.Ref, "refs/tags/") {
-			split := strings.SplitN(p.Ref, "/", 3)
-			tag := "<unknown>"
-			if len(split) == 3 {
-				tag = split[2]
-			}
-			err = s.sendSeabirdMessagef(
-				"[%s] %s %s tag %s: %s",
-				p.Repository.FullName,
-				p.Pusher.Login,
-				action,
-				tag,
-				p.CompareURL,
-			)
-		} else {
-			if !contains(mainBranches, p.Ref) {
-				s.logger.Info().Msgf("Skipping Forgejo push event for ref %s", p.Ref)
-				break
-			}
-
-			split := strings.SplitN(p.Ref, "/", 3)
-			branch := "<unknown>"
-			if len(split) == 3 {
-				branch = split[2]
-			}
-
-			err = s.sendSeabirdMessagef(
-				"[%s] %s %s %d commit(s) to %s: %s",
-				p.Repository.FullName,
-				p.Pusher.Login,
-				action,
-				len(p.Commits),
-				branch,
-				p.CompareURL,
-			)
-			if err != nil {
-				break
-			}
-
-			for _, commit := range p.Commits {
-				shortID := commit.ID
-				if len(shortID) > 8 {
-					shortID = shortID[:8]
-				}
-				err = s.sendSeabirdMessagef(
-					"[%s] [%s] %s %s: %s",
-					p.Repository.FullName,
-					branch,
-					shortID,
-					commit.Author.Login,
-					commit.Message,
-				)
-				if err != nil {
-					break
-				}
-			}
-		}
-	case "issues":
-		var p ForgejoIssuePayload
-		if err = json.Unmarshal(body, &p); err != nil {
-			break
-		}
-		err = s.sendSeabirdMessagef(
-			"[%s] %s %s issue %q: %s",
-			p.Repository.FullName,
-			p.Sender.Login,
-			p.Action,
-			p.Issue.Title,
-			p.Issue.HTMLURL,
-		)
-	case "pull_request":
-		var p ForgejoPullRequestPayload
-		if err = json.Unmarshal(body, &p); err != nil {
-			break
-		}
-		if !contains(prActions, p.Action) {
-			s.logger.Info().Msgf("Skipping Forgejo pull request event of type %s for %q", p.Action, p.PullRequest.Title)
-			break
-		}
-
-		action := p.Action
-		if action == "closed" && p.PullRequest.Merged {
-			action = "merged"
-		}
-
-		err = s.sendSeabirdMessagef(
-			"[%s] %s %s pull request #%d: %q (%s...%s) %s",
-			p.Repository.FullName,
-			p.Sender.Login,
-			action,
-			p.PullRequest.Number,
-			p.PullRequest.Title,
-			p.PullRequest.Base.Ref,
-			p.PullRequest.Head.Ref,
-			p.PullRequest.HTMLURL,
-		)
-	case "create":
-		var p ForgejoCreatePayload
-		if err = json.Unmarshal(body, &p); err != nil {
-			break
-		}
-		err = s.sendSeabirdMessagef(
-			"[%s] %s created %s %s",
-			p.Repository.FullName,
-			p.Sender.Login,
-			p.RefType,
-			p.Ref,
-		)
-	case "delete":
-		var p ForgejoDeletePayload
-		if err = json.Unmarshal(body, &p); err != nil {
-			break
-		}
-		err = s.sendSeabirdMessagef(
-			"[%s] %s deleted %s %s",
-			p.Repository.FullName,
-			p.Sender.Login,
-			p.RefType,
-			p.Ref,
-		)
-	default:
-		s.logger.Info().Msgf("Skipping unknown Forgejo event type %q", event)
+	ev, err := forgejoEvent(name, body)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("Failed to parse Forgejo webhook")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if ev == nil {
+		s.logger.Info().Msgf("Skipping Forgejo %q event", name)
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
-	if err != nil {
+	if err := s.send(r.Context(), ev); err != nil {
 		s.logger.Error().Err(err).Msg("Got error when sending Forgejo notification")
 		w.WriteHeader(http.StatusInternalServerError)
 		return
