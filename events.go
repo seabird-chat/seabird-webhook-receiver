@@ -104,13 +104,23 @@ type message struct {
 func newMessage(r repo) *message {
 	m := &message{}
 	if r.FullName != "" {
-		m.text("%s: ", r.FullName)
+		m.bold(r.FullName)
+		m.text(": ")
 	}
 	return m
 }
 
 func (m *message) text(format string, args ...any) {
 	m.blocks = append(m.blocks, seabird.NewTextBlockf(format, args...))
+}
+
+func (m *message) bold(text string) {
+	m.blocks = append(m.blocks, seabird.NewBoldBlock(seabird.NewTextBlock(text)))
+}
+
+// ref adds a bold "#N" issue or pull request reference.
+func (m *message) ref(number int64) {
+	m.bold(fmt.Sprintf("#%d", number))
 }
 
 func (m *message) code(text string) {
@@ -146,7 +156,9 @@ func (e issueEvent) block() *pb.Block {
 	}
 
 	m := newMessage(e.Repo)
-	m.text("%s %s issue #%d - ", e.Sender, e.Action, e.Number)
+	m.text("%s %s issue ", e.Sender, e.Action)
+	m.ref(e.Number)
+	m.text(" - ")
 	m.link(e.URL, seabird.NewTextBlock(e.Title))
 	return m.block()
 }
@@ -161,7 +173,9 @@ func (e pullRequestEvent) block() *pb.Block {
 	}
 
 	m := newMessage(e.Repo)
-	m.text("%s %s pull request #%d (", e.Sender, action, e.Number)
+	m.text("%s %s pull request ", e.Sender, action)
+	m.ref(e.Number)
+	m.text(" (")
 	m.code(e.Head)
 	m.text(" -> ")
 	m.code(e.Base)
@@ -181,7 +195,9 @@ func (e commentEvent) block() *pb.Block {
 	}
 
 	m := newMessage(e.Repo)
-	m.text("%s commented on %s #%d - ", e.Sender, kind, e.Number)
+	m.text("%s commented on %s ", e.Sender, kind)
+	m.ref(e.Number)
+	m.text(" - ")
 	m.link(e.URL, seabird.NewTextBlock(e.Title))
 	return m.block()
 }
@@ -200,7 +216,9 @@ func (e reviewEvent) block() *pb.Block {
 	}
 
 	m := newMessage(e.Repo)
-	m.text("%s %s pull request #%d - ", e.Sender, verb, e.Number)
+	m.text("%s %s pull request ", e.Sender, verb)
+	m.ref(e.Number)
+	m.text(" - ")
 	m.link(e.URL, seabird.NewTextBlock(e.Title))
 	return m.block()
 }
@@ -256,7 +274,7 @@ func (e pushEvent) block() *pb.Block {
 		items = append(items, c.block(e.Pusher))
 	}
 	if more := total - len(e.Commits); more > 0 {
-		items = append(items, seabird.NewTextBlockf("... and %d more", more))
+		items = append(items, seabird.NewItalicsBlock(seabird.NewTextBlockf("... and %d more", more)))
 	}
 	m.add(seabird.NewListBlock(items...))
 
@@ -266,15 +284,19 @@ func (e pushEvent) block() *pb.Block {
 // block renders a commit list item. The author is only shown when it
 // differs from the pusher.
 func (c commit) block(pusher string) *pb.Block {
-	text := " " + subject(c.Message)
-	if c.Author != "" && !strings.EqualFold(c.Author, pusher) {
-		text = " " + c.Author + " -" + text
-	}
-
-	return seabird.NewContainerBlock(
+	blocks := []*pb.Block{
 		seabird.NewInlineCodeBlock(shortSHA(c.ID)),
-		seabird.NewTextBlock(text),
-	)
+		seabird.NewTextBlock(" "),
+	}
+	if c.Author != "" && !strings.EqualFold(c.Author, pusher) {
+		blocks = append(blocks,
+			seabird.NewItalicsBlock(seabird.NewTextBlock(c.Author)),
+			seabird.NewTextBlock(" - "),
+		)
+	}
+	blocks = append(blocks, seabird.NewTextBlock(subject(c.Message)))
+
+	return seabird.NewContainerBlock(blocks...)
 }
 
 // subject returns the first non-empty line of a commit message.

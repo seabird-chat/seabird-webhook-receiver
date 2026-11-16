@@ -8,7 +8,7 @@ import (
 )
 
 // render turns a block into the markdown-style notation used in the
-// expected messages: `code`, [label](url), and "- " list items.
+// expected messages: `code`, **bold**, *italics*, [label](url), and "- " list items.
 func render(b *pb.Block) string {
 	var sb strings.Builder
 	renderTo(&sb, b)
@@ -21,6 +21,10 @@ func renderTo(sb *strings.Builder, b *pb.Block) {
 		sb.WriteString(v.Text.Text)
 	case *pb.Block_InlineCode:
 		sb.WriteString("`" + v.InlineCode.Text + "`")
+	case *pb.Block_Bold:
+		sb.WriteString("**" + render(v.Bold.Inner) + "**")
+	case *pb.Block_Italics:
+		sb.WriteString("*" + render(v.Italics.Inner) + "*")
 	case *pb.Block_Link:
 		sb.WriteString("[" + render(v.Link.Inner) + "](" + v.Link.Url + ")")
 	case *pb.Block_Container:
@@ -47,7 +51,7 @@ func TestEventBlocks(t *testing.T) {
 		{
 			name:  "ping",
 			event: pingEvent{Repo: testRepo, Sender: "belak"},
-			want:  "seabird-chat/seabird-core: belak added a webhook",
+			want:  "**seabird-chat/seabird-core**: belak added a webhook",
 		},
 		{
 			name:  "ping without repo",
@@ -60,7 +64,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "belak", Action: "opened",
 				Number: 42, Title: "Crash on reconnect", URL: "https://example.com/issues/42",
 			},
-			want: "seabird-chat/seabird-core: belak opened issue #42 - [Crash on reconnect](https://example.com/issues/42)",
+			want: "**seabird-chat/seabird-core**: belak opened issue **#42** - [Crash on reconnect](https://example.com/issues/42)",
 		},
 		{
 			name:  "issue labeled",
@@ -73,7 +77,7 @@ func TestEventBlocks(t *testing.T) {
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17",
 				Head: "belak/blocks", Base: "main",
 			},
-			want: "seabird-chat/seabird-core: belak opened pull request #17 (`belak/blocks` -> `main`) - [Add block support](https://example.com/pull/17)",
+			want: "**seabird-chat/seabird-core**: belak opened pull request **#17** (`belak/blocks` -> `main`) - [Add block support](https://example.com/pull/17)",
 		},
 		{
 			name: "pull request merged",
@@ -82,7 +86,7 @@ func TestEventBlocks(t *testing.T) {
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17",
 				Head: "jsvana:blocks", Base: "main",
 			},
-			want: "seabird-chat/seabird-core: belak merged pull request #17 (`jsvana:blocks` -> `main`) - [Add block support](https://example.com/pull/17)",
+			want: "**seabird-chat/seabird-core**: belak merged pull request **#17** (`jsvana:blocks` -> `main`) - [Add block support](https://example.com/pull/17)",
 		},
 		{
 			name:  "pull request synchronized",
@@ -94,7 +98,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "belak", Action: "created",
 				Number: 42, Title: "Crash on reconnect", URL: "https://example.com/issues/42#comment-1",
 			},
-			want: "seabird-chat/seabird-core: belak commented on issue #42 - [Crash on reconnect](https://example.com/issues/42#comment-1)",
+			want: "**seabird-chat/seabird-core**: belak commented on issue **#42** - [Crash on reconnect](https://example.com/issues/42#comment-1)",
 		},
 		{
 			name: "pull request comment",
@@ -102,7 +106,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "belak", Action: "created", PullRequest: true,
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17#comment-1",
 			},
-			want: "seabird-chat/seabird-core: belak commented on pull request #17 - [Add block support](https://example.com/pull/17#comment-1)",
+			want: "**seabird-chat/seabird-core**: belak commented on pull request **#17** - [Add block support](https://example.com/pull/17#comment-1)",
 		},
 		{
 			name:  "comment edited",
@@ -114,7 +118,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "jsvana", State: reviewApproved,
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17#review-1",
 			},
-			want: "seabird-chat/seabird-core: jsvana approved pull request #17 - [Add block support](https://example.com/pull/17#review-1)",
+			want: "**seabird-chat/seabird-core**: jsvana approved pull request **#17** - [Add block support](https://example.com/pull/17#review-1)",
 		},
 		{
 			name: "review changes requested",
@@ -122,7 +126,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "jsvana", State: reviewChangesRequested,
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17#review-1",
 			},
-			want: "seabird-chat/seabird-core: jsvana requested changes on pull request #17 - [Add block support](https://example.com/pull/17#review-1)",
+			want: "**seabird-chat/seabird-core**: jsvana requested changes on pull request **#17** - [Add block support](https://example.com/pull/17#review-1)",
 		},
 		{
 			name: "review commented",
@@ -130,7 +134,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Sender: "jsvana", State: reviewCommented,
 				Number: 17, Title: "Add block support", URL: "https://example.com/pull/17#review-1",
 			},
-			want: "seabird-chat/seabird-core: jsvana reviewed pull request #17 - [Add block support](https://example.com/pull/17#review-1)",
+			want: "**seabird-chat/seabird-core**: jsvana reviewed pull request **#17** - [Add block support](https://example.com/pull/17#review-1)",
 		},
 		{
 			name:  "review dismissed",
@@ -146,9 +150,9 @@ func TestEventBlocks(t *testing.T) {
 					{ID: "e5f6a7b8c9d0", Message: "chore: release v0.2.4 (#17)", Author: "jsvana"},
 				},
 			},
-			want: "seabird-chat/seabird-core: belak pushed [2 commits](https://example.com/compare/a...b) to `main`\n" +
+			want: "**seabird-chat/seabird-core**: belak pushed [2 commits](https://example.com/compare/a...b) to `main`\n" +
 				"- `a1b2c3d4` render: send blocks\n" +
-				"- `e5f6a7b8` jsvana - chore: release v0.2.4 (#17)",
+				"- `e5f6a7b8` *jsvana* - chore: release v0.2.4 (#17)",
 		},
 		{
 			name: "push one commit",
@@ -157,7 +161,7 @@ func TestEventBlocks(t *testing.T) {
 				CompareURL: "https://example.com/compare/a...b",
 				Commits:    []commit{{ID: "a1b2c3d4e5f6", Message: "\n  fix: thing\n", Author: "Belak"}},
 			},
-			want: "seabird-chat/seabird-core: belak pushed [1 commit](https://example.com/compare/a...b) to `master`\n" +
+			want: "**seabird-chat/seabird-core**: belak pushed [1 commit](https://example.com/compare/a...b) to `master`\n" +
 				"- `a1b2c3d4` fix: thing",
 		},
 		{
@@ -168,9 +172,9 @@ func TestEventBlocks(t *testing.T) {
 				TotalCommits: 3,
 				Commits:      []commit{{ID: "a1b2c3d4e5f6", Message: "fix: thing", Author: "belak"}},
 			},
-			want: "seabird-chat/seabird-core: belak pushed [3 commits](https://example.com/compare/a...b) to `main`\n" +
+			want: "**seabird-chat/seabird-core**: belak pushed [3 commits](https://example.com/compare/a...b) to `main`\n" +
 				"- `a1b2c3d4` fix: thing\n" +
-				"- ... and 2 more",
+				"- *... and 2 more*",
 		},
 		{
 			name: "force push commits",
@@ -179,7 +183,7 @@ func TestEventBlocks(t *testing.T) {
 				CompareURL: "https://example.com/compare/a...b",
 				Commits:    []commit{{ID: "a1b2c3d4e5f6", Message: "fix: thing", Author: "belak"}},
 			},
-			want: "seabird-chat/seabird-core: belak force pushed [1 commit](https://example.com/compare/a...b) to `main`\n" +
+			want: "**seabird-chat/seabird-core**: belak force pushed [1 commit](https://example.com/compare/a...b) to `main`\n" +
 				"- `a1b2c3d4` fix: thing",
 		},
 		{
@@ -188,12 +192,12 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Pusher: "belak", Ref: "refs/heads/main", Forced: true,
 				CompareURL: "https://example.com/compare/a...b",
 			},
-			want: "seabird-chat/seabird-core: belak force pushed [`main`](https://example.com/compare/a...b)",
+			want: "**seabird-chat/seabird-core**: belak force pushed [`main`](https://example.com/compare/a...b)",
 		},
 		{
 			name:  "push without commits or compare",
 			event: pushEvent{Repo: testRepo, Pusher: "belak", Ref: "refs/heads/main"},
-			want:  "seabird-chat/seabird-core: belak pushed `main`",
+			want:  "**seabird-chat/seabird-core**: belak pushed `main`",
 		},
 		{
 			name: "branch deleted",
@@ -201,7 +205,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Pusher: "belak", Ref: "refs/heads/main", Deleted: true,
 				CompareURL: "https://example.com/compare/a...b",
 			},
-			want: "seabird-chat/seabird-core: belak deleted branch `main`",
+			want: "**seabird-chat/seabird-core**: belak deleted branch `main`",
 		},
 		{
 			name: "push to other branch",
@@ -216,7 +220,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Pusher: "belak", Ref: "refs/tags/v0.3.1",
 				TagURL: "https://example.com/releases/tag/v0.3.1",
 			},
-			want: "seabird-chat/seabird-core: belak pushed tag [`v0.3.1`](https://example.com/releases/tag/v0.3.1)",
+			want: "**seabird-chat/seabird-core**: belak pushed tag [`v0.3.1`](https://example.com/releases/tag/v0.3.1)",
 		},
 		{
 			name: "tag deleted",
@@ -224,7 +228,7 @@ func TestEventBlocks(t *testing.T) {
 				Repo: testRepo, Pusher: "belak", Ref: "refs/tags/v0.3.1", Deleted: true,
 				TagURL: "https://example.com/releases/tag/v0.3.1",
 			},
-			want: "seabird-chat/seabird-core: belak deleted tag `v0.3.1`",
+			want: "**seabird-chat/seabird-core**: belak deleted tag `v0.3.1`",
 		},
 	}
 
