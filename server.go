@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -22,6 +23,7 @@ type Server struct {
 	github          *github.Webhook
 	forgejoSecret   string
 	targetChannelId string
+	listenAddr      string
 }
 
 type Config struct {
@@ -50,6 +52,7 @@ func NewServer(config Config) (*Server, error) {
 		github:          github,
 		forgejoSecret:   config.ForgejoSecret,
 		targetChannelId: config.SeabirdChannel,
+		listenAddr:      ":3000",
 	}, nil
 }
 
@@ -140,7 +143,7 @@ func (s *Server) handleForgejoWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) runHttp() error {
+func (s *Server) runHttp(ctx context.Context) error {
 	r := chi.NewRouter()
 
 	// The recommended middleware stack
@@ -154,28 +157,55 @@ func (s *Server) runHttp() error {
 	r.Post("/webhooks/github", s.handleGithubWebhook)
 	r.Post("/webhooks/forgejo", s.handleForgejoWebhook)
 
-	return http.ListenAndServe(":3000", r)
+	srv := &http.Server{Addr: s.listenAddr, Handler: r}
+
+	// When ctx is done (the other goroutine failed or the caller cancelled),
+	// stop serving so ListenAndServe returns.
+	var shutdownErr error
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-ctx.Done()
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr = srv.Shutdown(shutdownCtx)
+	}()
+
+	err := srv.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		// Clean stop after Shutdown; wait for in-flight requests to drain.
+		<-shutdownDone
+		return shutdownErr
+	}
+	return err
 }
 
-func (s *Server) runSeabird() error {
+func (s *Server) runSeabird(ctx context.Context) error {
 	stream, err := s.seabird.StreamEvents(map[string]*pb.CommandMetadata{})
 	if err != nil {
 		return err
 	}
+	defer stream.Close()
 
-	for event := range stream.C {
-		s.logger.Debug().Msgf("Got seabird event: %T", event.Inner)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case event, ok := <-stream.C:
+			if !ok {
+				return errors.New("seabird stream ended")
+			}
+			s.logger.Debug().Msgf("Got seabird event: %T", event.Inner)
+		}
 	}
-
-	return errors.New("seabird stream ended")
 }
 
 func (s *Server) Run(ctx context.Context) error {
-	// TODO: use the ctx Luke
-	group, _ := errgroup.WithContext(ctx)
+	group, ctx := errgroup.WithContext(ctx)
 
-	group.Go(s.runHttp)
-	group.Go(s.runSeabird)
+	group.Go(func() error { return s.runHttp(ctx) })
+	group.Go(func() error { return s.runSeabird(ctx) })
 
 	return group.Wait()
 }
