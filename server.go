@@ -68,9 +68,6 @@ func (s *Server) send(ctx context.Context, ev event) error {
 	_, err := s.seabird.Inner.SendMessage(ctx, &pb.SendMessageRequest{
 		ChannelId: s.targetChannelId,
 		RootBlock: block,
-		Tags: map[string]string{
-			"url/skip": "1",
-		},
 	})
 	return err
 }
