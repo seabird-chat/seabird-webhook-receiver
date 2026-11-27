@@ -42,7 +42,7 @@
 
           packages.default = pkgs.buildGoModule rec {
             pname = "seabird-webhook-receiver";
-            version = "0.3.5-dev";
+            version = "0.3.5";
 
             src = ./.;
 
